@@ -9,10 +9,10 @@ enum T {
     static var suite = ""
     static var current = ""
     static var failures = 0
-    nonisolated static let fixtures = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
+    nonisolated static let fixtures = URL(fileURLWithPath: CommandLine.arguments[0]).absoluteURL.deletingLastPathComponent()
         .appendingPathComponent("../Tests/Fixtures").standardized
     nonisolated static let artifacts: URL = {
-        let dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("test-artifacts")
+        let dir = URL(fileURLWithPath: CommandLine.arguments[0]).absoluteURL.deletingLastPathComponent().appendingPathComponent("test-artifacts")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }()
