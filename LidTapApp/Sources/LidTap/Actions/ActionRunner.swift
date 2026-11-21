@@ -2,25 +2,96 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 
-/// Synthesised keyboard and media-key events. Posting requires the Accessibility permission.
+/// Synthesised keyboard, media-key, mouse and scroll events. Posting requires the Accessibility permission.
 enum KeySender {
-    /// When non-zero, stamped into every synthesised event (tests use it to recognise and swallow them).
+    /// When non-zero, stamped into every synthesised event instead of `ownMarker` (tests use it to recognise and
+    /// swallow them).
     nonisolated(unsafe) static var eventMarker: Int64 = 0
+    /// Stamped into LidTap's own events so tap filtering doesn't take them for the user typing, clicking or
+    /// scrolling: two quick Desktop taps would otherwise look like a typing burst and block the next tap.
+    static let ownMarker: Int64 = 0x4C69_6454_6170  // "LidTap"
+    static var stamp: Int64 { eventMarker != 0 ? eventMarker : ownMarker }
+    /// Mach-clock time LidTap last posted an event. Without Input Monitoring the system's last-event times can't be
+    /// told apart by stamp, so InputMonitor skips the ones that are this close to LidTap's own.
+    nonisolated(unsafe) static var lastPosted = -Double.infinity
+
+    static func post(_ ev: CGEvent) {
+        ev.setIntegerValueField(.eventSourceUserData, value: stamp)
+        lastPosted = MachClock.now()
+        ev.post(tap: .cghidEventTap)
+    }
 
     enum Key: CGKeyCode {
-        case leftArrow = 123, rightArrow = 124, n = 45, v = 9, o = 31, e = 14
+        case leftArrow = 123, rightArrow = 124, downArrow = 125, upArrow = 126, n = 45, v = 9, o = 31, e = 14
+        case leftBracket = 33, rightBracket = 30, space = 49, f11 = 103
     }
 
     static func press(_ key: Key, flags: CGEventFlags) {
         var flags = flags
-        if key == .leftArrow || key == .rightArrow { flags.formUnion([.maskSecondaryFn, .maskNumericPad]) }
+        switch key {
+        case .leftArrow, .rightArrow, .upArrow, .downArrow: flags.formUnion([.maskSecondaryFn, .maskNumericPad])
+        case .f11: flags.formUnion(.maskSecondaryFn)
+        default: break
+        }
         let src = CGEventSource(stateID: .hidSystemState)
         for down in [true, false] {
             guard let ev = CGEvent(keyboardEventSource: src, virtualKey: key.rawValue, keyDown: down) else { continue }
             ev.flags = flags
-            if eventMarker != 0 { ev.setIntegerValueField(.eventSourceUserData, value: eventMarker) }
-            ev.post(tap: .cghidEventTap)
+            post(ev)
         }
+    }
+
+    /// A single click where the pointer is.
+    static func click(right: Bool = false) {
+        let src = CGEventSource(stateID: .hidSystemState)
+        let at = CGEvent(source: nil)?.location ?? .zero
+        let types: [CGEventType] = right ? [.rightMouseDown, .rightMouseUp] : [.leftMouseDown, .leftMouseUp]
+        for type in types {
+            guard let ev = CGEvent(mouseEventSource: src, mouseType: type, mouseCursorPosition: at, mouseButton: right ? .right : .left)
+            else { continue }
+            ev.setIntegerValueField(.mouseEventClickState, value: 1)
+            post(ev)
+        }
+    }
+
+    /// Scrolls whatever is under the pointer by `points` (positive: towards the top of the content, like turning a
+    /// wheel up). It glides: the distance is spread over pixel-precise events 15 ms apart (see `scrollSteps`).
+    static func scroll(points: Double) {
+        let marker = stamp
+        for (i, d) in scrollSteps(points: points).enumerated() where d != 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.015 * Double(i)) {
+                guard let ev = CGEvent(scrollWheelEvent2Source: CGEventSource(stateID: .hidSystemState), units: .pixel,
+                                       wheelCount: 1, wheel1: d, wheel2: 0, wheel3: 0) else { return }
+                ev.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+                ev.setIntegerValueField(.eventSourceUserData, value: marker)
+                lastPosted = MachClock.now()
+                ev.post(tap: .cghidEventTap)
+            }
+        }
+    }
+
+    /// One mouse-wheel notch under the pointer. Swipe feeds (Instagram Reels, YouTube Shorts, TikTok) move exactly one
+    /// video per notch, and pages that snap to items go to the next one; a smooth pixel glide can instead stop short
+    /// and snap back to the same video. Three lines clears the "was that a real scroll?" threshold feeds use.
+    static func wheelNotch(up: Bool) {
+        guard let ev = CGEvent(scrollWheelEvent2Source: CGEventSource(stateID: .hidSystemState), units: .line,
+                               wheelCount: 1, wheel1: up ? 3 : -3, wheel2: 0, wheel3: 0) else { return }
+        ev.setIntegerValueField(.scrollWheelEventIsContinuous, value: 0)
+        post(ev)
+    }
+
+    /// Whole-pixel steps that add up to exactly `points`, front-loaded so the scroll eases out like a trackpad flick.
+    static func scrollSteps(points: Double, steps: Int = 8) -> [Int32] {
+        let weights = (0..<steps).map { Double(steps - $0) }
+        let total = weights.reduce(0, +)
+        var out: [Int32] = [], done = 0.0, sent = 0
+        for w in weights {
+            done += points * w / total
+            let target = Int(done.rounded())
+            out.append(Int32(target - sent))
+            sent = target
+        }
+        return out
     }
 
     /// NX_KEYTYPE_* codes from IOKit's ev_keymap.h.
@@ -35,8 +106,7 @@ enum KeySender {
                                         timestamp: 0, windowNumber: 0, context: nil, subtype: 8,
                                         data1: (key.rawValue << 16) | (state << 8), data2: -1)
             guard let cg = ev?.cgEvent else { continue }
-            if eventMarker != 0 { cg.setIntegerValueField(.eventSourceUserData, value: eventMarker) }
-            cg.post(tap: .cghidEventTap)
+            post(cg)
         }
     }
 }
@@ -66,9 +136,20 @@ enum Permissions {
 
 @MainActor
 enum ActionRunner {
+    /// Default distance of one Scroll Up / Down tap, in points.
+    nonisolated static let defaultScrollDistance = 300.0
+    /// Repeated scroll taps the same way go further each time (up to 2.5x), like flicking a trackpad again.
+    private static var scrollRun: (time: Double, up: Bool, count: Int) = (-.infinity, true, 0)
+
+    static func scrollDistance(up: Bool, base: Double, now: Double = MachClock.now()) -> Double {
+        let count = (now - scrollRun.time < 1.2 && scrollRun.up == up) ? scrollRun.count + 1 : 0
+        scrollRun = (now, up, count)
+        return base * min(1 + 0.5 * Double(count), 2.5)
+    }
+
     /// Runs a zone's action. Returns an error message for the UI if it could not run.
     @discardableResult
-    static func perform(_ action: ZoneAction, guardController: PrivacyGuard) -> String? {
+    static func perform(_ action: ZoneAction, guardController: PrivacyGuard, scrollDistance: Double = defaultScrollDistance) -> String? {
         if action.kind.needsAccessibility && !Permissions.accessibility {
             Permissions.requestAccessibilityOnce()
             return "LidTap needs Accessibility permission to do this."
@@ -104,6 +185,34 @@ enum ActionRunner {
             Shortcuts.run(name)
         case .privacyGuard:
             guardController.toggle()
+        case .scrollUp:
+            KeySender.scroll(points: Self.scrollDistance(up: true, base: scrollDistance))
+        case .scrollDown:
+            KeySender.scroll(points: -Self.scrollDistance(up: false, base: scrollDistance))
+        case .nextReel:
+            KeySender.wheelNotch(up: false)
+        case .previousReel:
+            KeySender.wheelNotch(up: true)
+        case .click:
+            KeySender.click()
+        case .rightClick:
+            KeySender.click(right: true)
+        case .back:
+            KeySender.press(.leftBracket, flags: .maskCommand)
+        case .forward:
+            KeySender.press(.rightBracket, flags: .maskCommand)
+        case .missionControl:
+            KeySender.press(.upArrow, flags: .maskControl)
+        case .appWindows:
+            KeySender.press(.downArrow, flags: .maskControl)
+        case .showDesktop:
+            KeySender.press(.f11, flags: [])
+        case .spotlight:
+            KeySender.press(.space, flags: .maskCommand)
+        case .previousApp:
+            guard let app = AppHistory.shared.previous else { return "No other app to switch to yet." }
+            app.unhide()
+            app.activate()
         }
         return nil
     }
@@ -129,6 +238,37 @@ enum ActionRunner {
         } else if attempts > 0 {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { waitUntilFrontmost(bundleID, attempts: attempts - 1, body) }
         }
+    }
+}
+
+/// Which app was frontmost before the current one, for Previous App. (A synthesised ⌘Tab can leave the app
+/// switcher stuck on screen, since no real ⌘ release follows, so LidTap switches apps itself.)
+@MainActor
+final class AppHistory {
+    static let shared = AppHistory()
+    private var recent: [NSRunningApplication] = []
+    private var observer: NSObjectProtocol?
+
+    private init() {
+        if let front = NSWorkspace.shared.frontmostApplication { note(front) }
+        observer = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
+                                                                     object: nil, queue: .main) { n in
+            guard let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            MainActor.assumeIsolated { AppHistory.shared.note(app) }
+        }
+    }
+
+    func note(_ app: NSRunningApplication) {
+        guard app.activationPolicy == .regular, app.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
+        recent.removeAll { $0.processIdentifier == app.processIdentifier }
+        recent.insert(app, at: 0)
+        if recent.count > 8 { recent.removeLast() }
+    }
+
+    /// The most recent app other than the frontmost one that is still running.
+    var previous: NSRunningApplication? {
+        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        return recent.first { $0.processIdentifier != front && !$0.isTerminated }
     }
 }
 

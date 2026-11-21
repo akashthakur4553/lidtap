@@ -147,11 +147,17 @@ struct ZoneActionMenu: View {
     var body: some View {
         let current = app.action(for: zone).kind
         Text("Zone \(zone + 1)")
-        ForEach(ActionKind.allCases.filter { !$0.needsChoice }) { kind in
-            Button {
-                app.setAction(ZoneAction(kind: kind), for: zone)
-            } label: {
-                Label(kind.title, systemImage: current == kind ? "checkmark" : kind.symbol)
+        ForEach(ActionKind.groups, id: \.self) { group in
+            let kinds = ActionKind.allCases.filter { $0.group == group && !$0.needsChoice }
+            if !kinds.isEmpty {
+                Divider()
+                ForEach(kinds) { kind in
+                    Button {
+                        app.setAction(ZoneAction(kind: kind), for: zone)
+                    } label: {
+                        Label(kind.title, systemImage: current == kind ? "checkmark" : kind.symbol)
+                    }
+                }
             }
         }
         Divider()

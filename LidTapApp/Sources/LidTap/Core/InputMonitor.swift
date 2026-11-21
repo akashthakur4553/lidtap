@@ -49,6 +49,8 @@ final class InputMonitor {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return
         }
+        // LidTap's own clicks, scrolls and keys (Scroll Down, Desktop Right…) are not the user's input.
+        if Self.isOwn(event) { return }
         let kind: Kind
         switch type {
         case .keyDown, .keyUp, .flagsChanged: kind = .key
@@ -60,6 +62,9 @@ final class InputMonitor {
         let t = event.timestamp > 0 ? Double(event.timestamp) / 1e9 : MachClock.now()
         record(kind, at: t)
     }
+
+    /// Whether LidTap itself posted the event (see `KeySender.stamp`).
+    nonisolated static func isOwn(_ event: CGEvent) -> Bool { event.getIntegerValueField(.eventSourceUserData) == KeySender.stamp }
 
     /// Adds an event (also used by tests).
     func record(_ kind: Kind, at time: Double) {
@@ -99,6 +104,8 @@ final class InputMonitor {
         for (kind, types) in map where kinds.contains(kind) {
             for type in types {
                 let t = now - CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: type)
+                // These times carry no stamp, so skip any that is just LidTap's own last event.
+                if abs(t - KeySender.lastPosted) < 0.05 { continue }
                 if t >= from && t <= to { out.append(t) }
             }
         }

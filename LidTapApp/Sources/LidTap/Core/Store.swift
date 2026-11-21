@@ -39,6 +39,8 @@ struct AppConfig: Codable, Equatable {
     var actions: [String: ZoneAction] = [:]
     var showTapFeedback = true
     var playSounds = true
+    /// How far one Scroll Up / Down tap scrolls, in points (repeated taps go further).
+    var scrollDistance = ActionRunner.defaultScrollDistance
     var guardMutesMic = true
     var guardStopsCamera = true
     /// Ask GitHub about once a day whether a newer LidTap is out (installing always needs the user's OK).
@@ -61,6 +63,7 @@ struct AppConfig: Codable, Equatable {
         actions = try c.decodeIfPresent([String: ZoneAction].self, forKey: .actions) ?? d.actions
         showTapFeedback = try c.decodeIfPresent(Bool.self, forKey: .showTapFeedback) ?? d.showTapFeedback
         playSounds = try c.decodeIfPresent(Bool.self, forKey: .playSounds) ?? d.playSounds
+        scrollDistance = min(max(try c.decodeIfPresent(Double.self, forKey: .scrollDistance) ?? d.scrollDistance, 50), 2000)
         guardMutesMic = try c.decodeIfPresent(Bool.self, forKey: .guardMutesMic) ?? d.guardMutesMic
         guardStopsCamera = try c.decodeIfPresent(Bool.self, forKey: .guardStopsCamera) ?? d.guardStopsCamera
         checkForUpdates = try c.decodeIfPresent(Bool.self, forKey: .checkForUpdates) ?? d.checkForUpdates

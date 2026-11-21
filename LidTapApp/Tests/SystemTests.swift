@@ -1,4 +1,5 @@
 import AppKit
+import WebKit
 import AVFoundation
 import CoreAudio
 import CoreGraphics
@@ -84,7 +85,10 @@ func micState() -> [AudioDeviceID: [Float]] {
 
 /// Catches (and swallows) events carrying our marker, so synthesised keys can be checked without side effects.
 final class EventCatcher {
-    struct Caught { let type: UInt32; let key: Int64; let flags: CGEventFlags; let data1: Int }
+    struct Caught {
+        let type: UInt32; let key: Int64; let flags: CGEventFlags; let data1: Int
+        var location = CGPoint.zero, pixels: Int64 = 0, lines: Int64 = 0, continuous: Int64 = 0
+    }
     var caught: [Caught] = []
     let marker: Int64
     private var tap: CFMachPort?
@@ -92,13 +96,18 @@ final class EventCatcher {
 
     init?(marker: Int64) {
         self.marker = marker
-        let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue) | (1 << 14)
+        let types: [CGEventType] = [.keyDown, .keyUp, .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .scrollWheel]
+        let mask = types.reduce(CGEventMask(1 << 14)) { $0 | (1 << $1.rawValue) }
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
                                           eventsOfInterest: mask, callback: { _, type, event, user in
             let me = Unmanaged<EventCatcher>.fromOpaque(user!).takeUnretainedValue()
             guard event.getIntegerValueField(.eventSourceUserData) == me.marker else { return Unmanaged.passUnretained(event) }
             let data1 = type.rawValue == 14 ? (NSEvent(cgEvent: event)?.data1 ?? 0) : 0
-            me.caught.append(Caught(type: type.rawValue, key: event.getIntegerValueField(.keyboardEventKeycode), flags: event.flags, data1: data1))
+            me.caught.append(Caught(type: type.rawValue, key: event.getIntegerValueField(.keyboardEventKeycode), flags: event.flags, data1: data1,
+                                    location: event.location,
+                                    pixels: event.getIntegerValueField(.scrollWheelEventPointDeltaAxis1),
+                                    lines: event.getIntegerValueField(.scrollWheelEventDeltaAxis1),
+                                    continuous: event.getIntegerValueField(.scrollWheelEventIsContinuous)))
             return nil
         }, userInfo: Unmanaged.passUnretained(self).toOpaque()) else { return nil }
         self.tap = tap
@@ -345,6 +354,146 @@ func actionTests() {
 }
 
 // MARK: - Privacy Guard
+
+// MARK: - Pointer actions
+
+/// Click, scroll, Reels and the navigation keys. Posts real events but catches and swallows them, except two
+/// scroll checks aimed at windows this test opens itself (the pointer is moved over them, then put back).
+@MainActor
+func pointerTests() {
+    T.suite = "Pointer"
+    print("\n▶ Pointer actions (real system)")
+    guard Permissions.accessibility else {
+        T.run("accessibility") { throw T.Skip(reason: "this process has no Accessibility permission") }
+        return
+    }
+    let guardStub = PrivacyGuard(presentsOverlay: false)
+    func perform(_ kind: ActionKind, distance: Double = 300) {
+        _ = ActionRunner.perform(ZoneAction(kind: kind), guardController: guardStub, scrollDistance: distance)
+    }
+
+    T.run("navigation actions post the right keys (caught and swallowed)") {
+        guard let catcher = EventCatcher(marker: 0x7A9C11) else { throw T.Skip(reason: "could not create an event tap") }
+        defer { catcher.stop(); KeySender.eventMarker = 0 }
+        KeySender.eventMarker = catcher.marker
+        let cases: [(ActionKind, Int64, CGEventFlags)] = [
+            (.back, 33, .maskCommand), (.forward, 30, .maskCommand), (.missionControl, 126, .maskControl),
+            (.appWindows, 125, .maskControl), (.showDesktop, 103, []), (.spotlight, 49, .maskCommand),
+        ]
+        for (kind, key, flags) in cases {
+            catcher.caught.removeAll()
+            perform(kind)
+            T.wait(1) { catcher.caught.count >= 2 }
+            let down = catcher.caught.filter { $0.type == CGEventType.keyDown.rawValue }
+            T.expect(catcher.caught.count == 2 && down.count == 1 && down[0].key == key
+                     && down[0].flags.intersection([.maskCommand, .maskControl, .maskShift, .maskAlternate]) == flags,
+                     "\(kind.title): \(catcher.caught.map { "type \($0.type) key \($0.key) flags \($0.flags.rawValue)" })")
+        }
+    }
+
+    T.run("Click and Right Click press and release where the pointer is (caught and swallowed)") {
+        guard let catcher = EventCatcher(marker: 0x7A9C12) else { throw T.Skip(reason: "could not create an event tap") }
+        defer { catcher.stop(); KeySender.eventMarker = 0 }
+        KeySender.eventMarker = catcher.marker
+        let pointer = CGEvent(source: nil)!.location
+        for (kind, types) in [(ActionKind.click, [CGEventType.leftMouseDown, .leftMouseUp]), (.rightClick, [.rightMouseDown, .rightMouseUp])] {
+            catcher.caught.removeAll()
+            perform(kind)
+            T.wait(1) { catcher.caught.count >= 2 }
+            T.expect(catcher.caught.map(\.type) == types.map(\.rawValue), "\(kind.title): types \(catcher.caught.map(\.type))")
+            T.expect(catcher.caught.allSatisfy { abs($0.location.x - pointer.x) < 1 && abs($0.location.y - pointer.y) < 1 },
+                     "\(kind.title) landed away from the pointer")
+        }
+    }
+
+    T.run("Scroll glides by the set distance; Next/Previous Reel post one wheel notch (caught and swallowed)") {
+        guard let catcher = EventCatcher(marker: 0x7A9C13) else { throw T.Skip(reason: "could not create an event tap") }
+        defer { catcher.stop(); KeySender.eventMarker = 0 }
+        KeySender.eventMarker = catcher.marker
+        for (kind, want) in [(ActionKind.scrollDown, -300), (.scrollUp, 300)] {
+            catcher.caught.removeAll()
+            perform(kind)
+            T.sleep(0.4)
+            let total = catcher.caught.reduce(0) { $0 + $1.pixels }
+            T.expect(catcher.caught.count >= 4 && total == want && catcher.caught.allSatisfy { $0.continuous == 1 },
+                     "\(kind.title): \(catcher.caught.count) events, \(total) px")
+        }
+        for (kind, want) in [(ActionKind.nextReel, -3), (.previousReel, 3)] {
+            catcher.caught.removeAll()
+            perform(kind)
+            T.sleep(0.3)
+            T.expect(catcher.caught.count == 1 && catcher.caught[0].lines == Int64(want) && catcher.caught[0].continuous == 0,
+                     "\(kind.title): \(catcher.caught.map { "lines \($0.lines) continuous \($0.continuous)" })")
+        }
+    }
+
+    /// A window of this test's own with the pointer over its middle; the pointer goes back afterwards.
+    func withPointer(over view: NSView, _ body: () -> Void) {
+        let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 320, height: 480), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.level = .floating
+        window.contentView = view
+        window.orderFrontRegardless()
+        let saved = CGEvent(source: nil)!.location
+        let mainHeight = NSScreen.screens[0].frame.height
+        let f = window.frame
+        CGWarpMouseCursorPosition(CGPoint(x: f.midX, y: mainHeight - f.midY))
+        T.sleep(0.3)
+        body()
+        CGWarpMouseCursorPosition(saved)
+        window.orderOut(nil)
+    }
+
+    T.run("Scroll Down moves real content down, Scroll Up brings it back") {
+        final class Flipped: NSView { override var isFlipped: Bool { true } }
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 320, height: 480))
+        scroll.documentView = Flipped(frame: NSRect(x: 0, y: 0, width: 300, height: 6000))
+        scroll.hasVerticalScroller = true
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 2000))
+        withPointer(over: scroll) {
+            let start = scroll.contentView.bounds.origin.y
+            perform(.scrollDown)
+            T.sleep(0.6)
+            let down = scroll.contentView.bounds.origin.y
+            T.sleep(1.3)  // let the repeat-tap boost lapse
+            perform(.scrollUp)
+            T.sleep(0.6)
+            let up = scroll.contentView.bounds.origin.y
+            T.note("content offset \(Int(start)) → \(Int(down)) → \(Int(up))")
+            T.expect(down > start + 100, "Scroll Down didn't move the content down (\(start) → \(down))")
+            T.expect(up < down - 100, "Scroll Up didn't move it back (\(down) → \(up))")
+        }
+    }
+
+    T.run("Next/Previous Reel move exactly one video in a Reels-style page (WebKit, CSS scroll snap)") {
+        let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 320, height: 480))
+        let reels = (0..<10).map { "<div class=r style='background:hsl(\($0 * 36),60%,50%)'>\($0)</div>" }.joined()
+        web.loadHTMLString("""
+            <style>html,body{margin:0;height:100%;overflow:hidden}#f{height:100%;overflow-y:scroll;scroll-snap-type:y mandatory}
+            .r{height:100%;scroll-snap-align:start;font:80px sans-serif;color:#fff}</style><div id=f>\(reels)</div>
+            """, baseURL: nil)
+        T.wait(5) { !web.isLoading }
+        @MainActor func current() -> Int? {
+            var out: Int?, done = false
+            web.evaluateJavaScript("var f=document.getElementById('f');Math.round(f.scrollTop/f.clientHeight)") { v, _ in
+                out = (v as? NSNumber)?.intValue
+                done = true
+            }
+            T.wait(2) { done }
+            return out
+        }
+        withPointer(over: web) {
+            var seen: [Int?] = [current()]
+            for kind in [ActionKind.nextReel, .nextReel, .previousReel] {
+                perform(kind)
+                T.sleep(1.2)  // the snap animation
+                seen.append(current())
+            }
+            T.note("reel index: \(seen.map { $0.map(String.init) ?? "?" }.joined(separator: " → "))")
+            T.expect(seen == [0, 1, 2, 1], "reels went \(seen)")
+        }
+    }
+}
 
 @MainActor
 func guardTests() {

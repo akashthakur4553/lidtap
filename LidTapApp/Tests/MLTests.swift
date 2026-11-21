@@ -64,6 +64,33 @@ func mlTests() {
         }
     }
 
+    T.run("SVM: probabilities form a distribution; pairwise coupling is exact for two classes") {
+        let svm = SupportVectorMachine(Z: (0..<48).map { [Double($0 % 4), Double($0 / 4 % 3) * 0.1] }, y: (0..<48).map { $0 % 4 }, classes: 4)
+        for z in [[0.0, 0], [3, 2], [1.5, 1]] {
+            let p = svm.probabilities(z)
+            T.expect(p.allSatisfy { $0 >= 0 && $0 <= 1 } && abs(p.reduce(0, +) - 1) < 1e-6, "probabilities \(p)")
+        }
+        let two = SupportVectorMachine.couple([[0, 0.8], [0.2, 0]])
+        T.expect(abs(two[0] - 0.8) < 1e-3 && abs(two[1] - 0.2) < 1e-3, "coupled \(two)")
+    }
+
+    T.run("zones that share an action are recognised as one") {
+        let m = ZoneModel(kind: .svm, X: train.map { X[$0] }, labels: train.map { labels[$0] })
+        let byRow: (String) -> String = { zoneIndex($0).map { "row\($0 / 2)" } ?? $0 }
+        var rowRight = (alone: 0, grouped: 0)
+        for i in test {
+            let alone = m.predict(X[i], rejectFactor: 2), grouped = m.predict(X[i], rejectFactor: 2, group: byRow)
+            T.expect(grouped.confidence >= alone.confidence - 1e-12, "grouping lowered confidence \(alone.confidence) → \(grouped.confidence)")
+            if byRow(alone.label) == byRow(labels[i]) { rowRight.alone += 1 }
+            if byRow(grouped.label) == byRow(labels[i]) { rowRight.grouped += 1 }
+            // Without shared actions grouping changes nothing.
+            let unique = m.predict(X[i], rejectFactor: 2, group: { $0 })
+            T.expect(unique == alone, "identity grouping changed the prediction")
+        }
+        T.note("right row: \(rowRight.alone)/\(test.count) by zone, \(rowRight.grouped)/\(test.count) grouped")
+        T.expect(rowRight.grouped >= rowRight.alone, "grouping picked the wrong row more often")
+    }
+
     T.run("cross-validated evaluation on real taps") {
         let r = Evaluator.evaluate(X: X, labels: labels, grid: ds.grid)
         T.expect(r.layouts == ["Full grid", "Left / right", "Top / bottom"], "2×2 layouts \(r.layouts)")
@@ -124,7 +151,7 @@ func mlTests() {
         let t0 = Date()
         _ = Evaluator.evaluate(X: bigX, labels: bigL, grid: Grid(rows: 3, cols: 3), augmented: aug)
         let dt = Date().timeIntervalSince(t0)
-        T.note(String(format: "full evaluation with ×%d augmentation (3 models × 6 layouts + learning curve): %.2f s", Augment.copies + 1, dt))
+        T.note(String(format: "full evaluation with ×%d augmentation (\(ModelKind.allCases.count) models × 6 layouts + learning curve): %.2f s", Augment.copies + 1, dt))
         T.expect(dt < 30, "evaluation took \(dt) s")
         let t1 = Date()
         let m = ZoneModel(kind: .logreg, X: bigX, labels: bigL, augmented: aug)

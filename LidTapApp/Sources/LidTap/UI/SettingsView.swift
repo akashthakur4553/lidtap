@@ -89,8 +89,12 @@ private struct ZonesPane: View {
                         default: app.setAction(ZoneAction(kind: kind), for: selected)
                         }
                     })) {
-                    ForEach(ActionKind.allCases) { kind in
-                        Label(kind.title, systemImage: kind.symbol).tag(kind)
+                    ForEach(ActionKind.groups, id: \.self) { group in
+                        Section(group == "None" ? "" : group) {
+                            ForEach(ActionKind.allCases.filter { $0.group == group }) { kind in
+                                Label(kind.title, systemImage: kind.symbol).tag(kind)
+                            }
+                        }
                     }
                 }
                 if current.kind == .openApp {
@@ -115,6 +119,18 @@ private struct ZonesPane: View {
                         .disabled(current.kind == .none || !current.isComplete)
                 } label: {
                     Text(current.kind.detail).foregroundStyle(.secondary)
+                }
+                if current.kind == .scrollUp || current.kind == .scrollDown {
+                    LabeledContent {
+                        HStack {
+                            Slider(value: Binding(get: { app.config.scrollDistance },
+                                                  set: { app.config.scrollDistance = ($0 / 25).rounded() * 25 }), in: 100...1000)
+                            Text("\(Int(app.config.scrollDistance)) pt").monospacedDigit().frame(width: 52, alignment: .trailing)
+                        }
+                    } label: {
+                        Text("Scroll distance")
+                        Text("How far one tap scrolls. Tap again quickly to go further.")
+                    }
                 }
                 if current.kind.needsAccessibility && !app.status.accessibility {
                     Label("Needs Accessibility. Allow it in Permissions.", systemImage: "exclamationmark.triangle.fill")

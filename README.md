@@ -28,6 +28,13 @@ you choose which.
 | Action | What it does |
 |---|---|
 | **Desktop Left / Right** | Switch to the previous or next desktop (Space) |
+| **Mission Control, App Windows, Show Desktop** | See every window, the front app's windows, or the desktop, as with ⌃↑, ⌃↓ and F11 |
+| **Scroll Up / Down** | Scroll whatever is under the pointer, smoothly. Tap again quickly to go further; set how far in Settings → Zones |
+| **Next / Previous Reel** | One video on or back in Instagram Reels, YouTube Shorts, TikTok and other swipe feeds |
+| **Click, Right Click** | Click where the pointer is |
+| **Back, Forward** | Go back or forward (⌘[ and ⌘]) in Safari, Chrome, Finder and most apps |
+| **Previous App** | Switch to the app you used before this one |
+| **Spotlight** | Open Spotlight search |
 | **Play / Pause, Next, Previous** | Control whatever is playing: Music, Spotify, YouTube |
 | **Volume Up / Down, Mute Sound** | Change the volume one step, or mute it, just like the volume keys |
 | **New Note** | Open a fresh note in Notes |
@@ -39,7 +46,16 @@ The default 2×2 layout: top-left **Desktop Left**, top-right **Desktop Right**,
 **Play / Pause**, bottom-right **Privacy Guard**.
 
 LidTap ignores the bumps that aren't taps: typing, clicking, scrolling, moving the pointer, moving the
-lid, and knocks on the desk.
+lid, and knocks on the desk. Its own clicks, scrolls and key presses never count against your next tap.
+
+### Scrolling and Reels
+
+Give a whole row one action: top row **Scroll Up**, bottom row **Scroll Down** (or **Previous Reel** and
+**Next Reel** for Reels, Shorts and TikTok). Zones that do the same thing are recognised as one, so a tap
+LidTap can't place between the two bottom zones still scrolls down: in testing, 40 of 40 such taps did the
+right thing at a 90% confidence floor, none the wrong thing. Keep the pointer over what you want to scroll.
+Scroll glides like a trackpad; Next / Previous Reel sends one wheel notch, which swipe feeds treat as exactly
+one video.
 
 ## Profiles: desk, lap, sofa
 
@@ -149,14 +165,23 @@ LidTapApp/scripts/test.sh
 
 That runs the ML, detector, app-logic and UI suites with no side effects. The Python prototype has its own
 hardware-free tests: `python -m unittest tests.test_prototype` from the repo root. `hardware`, `actions`,
-`guard` and `e2e` suites drive the real system (switch Spaces, mute the mic, open apps), so run
-them only when you aren't using the Mac.
+`pointer`, `guard` and `e2e` suites drive the real system (switch Spaces, mute the mic, open apps, move the
+pointer), so run them only when you aren't using the Mac.
+
+**Compare recognisers on recorded taps** (your own calibration by default, or any `dataset.json`):
+
+```bash
+LidTapApp/scripts/eval.sh [path/to/dataset.json]
+```
+
+It prints cross-validated accuracy per recogniser and layout, the learning curve, and a live-use simulation
+(right, wrong, "not sure") with and without zones sharing an action. It only reads the dataset.
 
 **How it works, briefly:** the app reads the accelerometer and gyroscope through IOKit HID
 (`AppleSPUHIDDevice`, ~800 Hz), high-pass filters the gyro, and triggers on an adaptive threshold.
 Each tap becomes a 200 ms window and 70 features (shape, timing, axis ratios and a resampled template),
-classified by a k-nearest-neighbours, logistic-regression or nearest-centroid model, whichever
-cross-validates best on your own data. Taps far from anything it has learned, or below its confidence
+classified by an RBF support vector machine, k-nearest-neighbours, logistic-regression or nearest-centroid
+model, whichever cross-validates best on your own data. Taps far from anything it has learned, or below its confidence
 floor, are rejected. Credit for the sensor work goes to [yamete](https://github.com/chipcolate/yamete),
 [apple-silicon-accelerometer](https://github.com/olvvier/apple-silicon-accelerometer) and
 [LidAngleSensor](https://github.com/samhenrigold/LidAngleSensor); see `reports/` for the full list.

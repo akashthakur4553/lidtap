@@ -1,7 +1,7 @@
 #!/bin/bash
 # Builds and runs the LidTap test suites.
 #   scripts/test.sh                              ml detector logic ui (no side effects)
-#   scripts/test.sh hardware actions guard e2e   real-system suites (switch Spaces, mute the mic, open apps…)
+#   scripts/test.sh hardware actions pointer guard e2e   real-system suites (switch Spaces, mute the mic, open apps…)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
@@ -14,6 +14,6 @@ while IFS= read -r -d '' f; do files+=("$f"); done < <(find Sources Tests -name 
 mkdir -p build
 echo "Compiling tests (${#files[@]} files)…"
 swiftc -O -swift-version 5 -sdk "$(xcrun --show-sdk-path)" -target arm64-apple-macos14.0 -vfsoverlay "$FIX/overlay.yaml" \
-  -framework IOKit -framework CoreAudio -framework CoreMediaIO -framework ServiceManagement -framework Security -framework AVFoundation \
+  -framework IOKit -framework CoreAudio -framework CoreMediaIO -framework ServiceManagement -framework Security -framework AVFoundation -framework WebKit \
   "${files[@]}" -o build/LidTapTests
 exec build/LidTapTests "$@"

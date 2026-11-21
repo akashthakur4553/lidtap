@@ -10,6 +10,7 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier, NearestCentroid
 from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from lidtap import features  # noqa: E402
@@ -27,6 +28,7 @@ out = {
         "knn": KNeighborsClassifier(3, weights="distance").fit(Z[train], y[train]).predict(Z[test]).tolist(),
         "centroid": NearestCentroid().fit(Z[train], y[train]).predict(Z[test]).tolist(),
         "logreg": LogisticRegression(max_iter=3000).fit(Z[train], y[train]).predict(Z[test]).tolist(),
+        "svm": SVC(C=3, gamma="scale").fit(Z[train], y[train]).predict(Z[test]).tolist(),
     },
     "test_labels": y[test].tolist(),
     "percentiles": [

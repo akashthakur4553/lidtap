@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// AppModel end to end with a temporary data folder, no UI, and actions recorded instead of performed.
 @MainActor
@@ -185,6 +185,24 @@ func appLogicTests() {
         h.performed.removeAll()
         for _ in 0..<5 { h.tap("z1") }
         T.expect(h.performed.count >= 4, "with a 60% floor only \(h.performed.count)/5 acted")
+    }
+
+    T.run("zones sharing an action act together: unsure between two Scroll Down zones still scrolls") {
+        let h = AppHarness(name: "grouped")
+        guard h.train() else { return T.fail("no model") }
+        h.app.config.minConfidence = 0.9
+        for z in 0..<4 { h.app.setAction(ZoneAction(kind: z < 2 ? .scrollUp : .scrollDown), for: z) }
+        var right = 0, wrong = 0
+        for zone in 0..<4 {
+            for _ in 0..<10 {
+                h.performed.removeAll()
+                h.tap(zoneLabel(zone))
+                guard let done = h.performed.first else { continue }
+                if done.kind == (zone < 2 ? .scrollUp : .scrollDown) { right += 1 } else { wrong += 1 }
+            }
+        }
+        T.note("top row → Scroll Up, bottom row → Scroll Down at a 90% floor: \(right) right, \(wrong) wrong of 40")
+        T.expect(right >= 36 && wrong <= 1, "\(right) right, \(wrong) wrong")
     }
 
     T.run("strength coaching: soft live taps never act; training uses only crisp taps") {
@@ -490,5 +508,55 @@ func appLogicTests() {
         let ms = Date().timeIntervalSince(t0) * 1000 / 100
         T.note(String(format: "%.2f ms per tap on the main thread", ms))
         T.expect(ms < 15, "handling a tap takes \(ms) ms")
+    }
+
+    touchActionTests()
+}
+
+@MainActor
+func touchActionTests() {
+    T.run("every action has a title, a description, an icon and a place in the picker") {
+        for kind in ActionKind.allCases {
+            T.expect(!kind.title.isEmpty && !kind.detail.isEmpty && !kind.symbol.isEmpty, "\(kind) is missing text")
+            T.expect(ActionKind.groups.contains(kind.group), "\(kind) is in group \(kind.group), which the picker doesn't show")
+            T.expect(NSImage(systemSymbolName: kind.symbol, accessibilityDescription: nil) != nil, "\(kind): no symbol \(kind.symbol)")
+        }
+        T.expect(ZoneAction(kind: .openApp, appBundleID: "a").effect != ZoneAction(kind: .openApp, appBundleID: "b").effect,
+                 "different apps must not count as the same action")
+    }
+
+    T.run("a scroll glides in whole pixels that add up exactly and ease out") {
+        for points in [300.0, -300, 125, -1000, 7] {
+            let steps = KeySender.scrollSteps(points: points)
+            T.expect(Double(steps.reduce(0) { $0 + Int($1) }) == points.rounded(), "\(points): steps \(steps)")
+            T.expect(steps.allSatisfy { points >= 0 ? $0 >= 0 : $0 <= 0 }, "\(points): a step goes the wrong way \(steps)")
+            T.expect(abs(Int(steps.first!)) >= abs(Int(steps.last!)), "\(points): doesn't ease out \(steps)")
+        }
+    }
+
+    T.run("repeated scroll taps go further; a pause or a change of direction starts over") {
+        let t = 1_000.0
+        let d = [ActionRunner.scrollDistance(up: false, base: 100, now: t),
+                 ActionRunner.scrollDistance(up: false, base: 100, now: t + 0.6),
+                 ActionRunner.scrollDistance(up: false, base: 100, now: t + 1.2),
+                 ActionRunner.scrollDistance(up: false, base: 100, now: t + 1.8),
+                 ActionRunner.scrollDistance(up: false, base: 100, now: t + 2.4),
+                 ActionRunner.scrollDistance(up: true, base: 100, now: t + 3.0),
+                 ActionRunner.scrollDistance(up: true, base: 100, now: t + 9.0)]
+        T.expect(d == [100, 150, 200, 250, 250, 100, 100], "distances \(d)")
+    }
+
+    T.run("LidTap's own events are not taken for the user's input") {
+        let own = CGEvent(source: nil)!, user = CGEvent(source: nil)!
+        own.setIntegerValueField(.eventSourceUserData, value: KeySender.stamp)
+        T.expect(InputMonitor.isOwn(own) && !InputMonitor.isOwn(user), "stamp not recognised")
+    }
+
+    T.run("scroll distance: default, saved, and kept within range") {
+        T.expect(AppConfig().scrollDistance == 300, "default \(AppConfig().scrollDistance)")
+        for (json, want) in [(#"{"scrollDistance": 600}"#, 600.0), (#"{"scrollDistance": 1}"#, 50), (#"{}"#, 300)] {
+            let cfg = try! JSONDecoder().decode(AppConfig.self, from: Data(json.utf8))
+            T.expect(cfg.scrollDistance == want, "\(json) → \(cfg.scrollDistance)")
+        }
     }
 }

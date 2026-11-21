@@ -142,7 +142,10 @@ final class AppModel {
         detector.settings = config.detector
         privacyGuard.muteMic = config.guardMutesMic
         privacyGuard.stopCamera = config.guardStopsCamera
-        performAction = { [unowned self] action in ActionRunner.perform(action, guardController: privacyGuard) }
+        performAction = { [unowned self] action in
+            ActionRunner.perform(action, guardController: privacyGuard, scrollDistance: config.scrollDistance)
+        }
+        _ = AppHistory.shared  // start noting app switches now, for Previous App
         updater.onFound = { [weak self] _, userAsked in self?.offerUpdate(userAsked: userAsked) }
     }
 
@@ -337,7 +340,10 @@ final class AppModel {
             record(.untrained, nil, nil, "Tap detected. Calibrate to map it to a zone")
             return
         }
-        let p = model.predict(Features.extract(g: event.g, a: event.a), rejectFactor: config.rejectFactor)
+        // Zones that do the same thing are recognised as one: unsure between two Scroll Down zones is still sure.
+        let actions = config.actions
+        let p = model.predict(Features.extract(g: event.g, a: event.a), rejectFactor: config.rejectFactor,
+                              group: { label in actions[label].flatMap { $0.kind == .none ? nil : $0.effect } ?? label })
         let action = config.actions[p.label] ?? ZoneAction()
 
         if privacyGuard.isActive {

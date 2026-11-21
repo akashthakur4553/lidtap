@@ -63,10 +63,24 @@ struct ZoneModel {
         self.radius = radius
     }
 
-    func predict(_ features: [Double], rejectFactor: Double) -> Prediction {
+    /// - Parameter group: maps each label to what it does. Zones that share an action form one group: the group
+    ///   with the most total probability wins and its summed probability is the confidence, so a tap that is unsure
+    ///   *between* two zones doing the same thing (two Scroll Down zones, say) still acts. Without it, each zone
+    ///   stands alone.
+    func predict(_ features: [Double], rejectFactor: Double, group: ((String) -> String)? = nil) -> Prediction {
         let z = scaler.transform(features)
         let p = classifier.probabilities(z)
-        let c = p.indices.max { p[$0] < p[$1] }!
+        var c = p.indices.max { p[$0] < p[$1] }!
+        var confidence = p[c]
+        if let group, classes[c] != noiseLabel {
+            let key = classes.map(group)
+            var total: [String: Double] = [:]
+            for i in classes.indices { total[key[i], default: 0] += p[i] }
+            if let best = total.max(by: { $0.value < $1.value }), best.key != noiseLabel {
+                c = classes.indices.filter { key[$0] == best.key }.max { p[$0] < p[$1] }!
+                confidence = best.value
+            }
+        }
         let nearest = Z.indices.filter { y[$0] == c }.map { dist(Z[$0], z) }.min() ?? .infinity
         let novelty = radius[c].isFinite ? nearest / radius[c] : 0
         var rejected: String?
@@ -75,7 +89,7 @@ struct ZoneModel {
         } else if novelty > rejectFactor {
             rejected = "Unfamiliar tap"
         }
-        return Prediction(label: classes[c], confidence: p[c], novelty: novelty, rejected: rejected)
+        return Prediction(label: classes[c], confidence: confidence, novelty: novelty, rejected: rejected)
     }
 }
 

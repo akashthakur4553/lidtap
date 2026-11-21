@@ -15,9 +15,13 @@ Command Line Tools 26.1 install (a stray `module.modulemap`) with a VFS overlay;
 
 ## Zone actions
 
-Desktop Left / Right · New Note · Play/Pause · Next / Previous Track · Volume Up / Down · Mute Sound ·
-Open App (launch or bring to front) · Run Shortcut ·
-Privacy Guard.
+Desktop Left / Right · Mission Control · App Windows · Show Desktop · Scroll Up / Down · Next / Previous Reel ·
+Click · Right Click · Back / Forward · Previous App · Spotlight · New Note · Play/Pause · Next / Previous Track ·
+Volume Up / Down · Mute Sound · Open App (launch or bring to front) · Run Shortcut · Privacy Guard.
+
+Zones with the same action are recognised as one group (`ZoneModel.predict(_:rejectFactor:group:)`): the
+group with the most probability wins, so being unsure *between* two Scroll Down zones still scrolls down.
+LidTap stamps the events it posts (`KeySender.stamp`) so tap filtering never takes them for the user's input.
 
 **Privacy Guard** blurs every screen instantly, mutes every microphone at the system level (restored
 exactly afterwards), and if a camera is in use, turns it off in Zoom, Microsoft Teams, Webex or
@@ -39,10 +43,11 @@ The build is ad-hoc signed, so after each rebuild macOS may need Accessibility s
 | `Sources/LidTap/Core/IMUReader.swift` | IOKit access to the IMU (~800 Hz) and lid-angle sensor |
 | `Sources/LidTap/Core/TapDetector.swift` | High-pass, adaptive gyro trigger, 200 ms tap windows, input/lid gates |
 | `Sources/LidTap/Core/Features.swift` | 70 tap features, identical to the Python prototype |
-| `Sources/LidTap/Core/Classifiers.swift`, `ZoneModel.swift` | Logistic regression, kNN, nearest centroid; cross-validation; open-set rejection |
+| `Sources/LidTap/Core/Classifiers.swift`, `ZoneModel.swift` | RBF SVM (libsvm's SMO, one-vs-one, pairwise-coupled probabilities), logistic regression, kNN, nearest centroid; cross-validation; open-set rejection; action grouping |
 | `Sources/LidTap/Core/Store.swift` | Config and dataset in `~/Library/Application Support/LidTap` (added profiles' taps in `profiles/<id>.json`) |
 | `Sources/LidTap/Core/Profiles.swift` | Profiles: per-place calibration, sensitivity and zone actions |
 | `Sources/LidTap/Core/Updater.swift` | Self-update from GitHub releases: check, download, Developer ID signature check, swap and relaunch |
-| `Sources/LidTap/Actions/` | Zone actions, key/media events, Privacy Guard, meeting camera control |
+| `Sources/LidTap/Actions/` | Zone actions, key/media/mouse/scroll events, Privacy Guard, meeting camera control |
+| `Tools/eval/`, `scripts/eval.sh` | Offline recogniser comparison and live-use simulation on a recorded dataset |
 | `Sources/LidTap/UI/` | Menu bar panel with profile switcher, Settings (including Profiles), Software Update window, full-screen calibration, on-screen tap feedback |
 | `Sources/LidTap/App/` | App entry, central model |
