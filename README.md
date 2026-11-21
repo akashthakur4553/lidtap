@@ -22,8 +22,8 @@ Made by [Yemcube (@yem.cube)](https://www.instagram.com/yem.cube).
 
 ## What a tap can do
 
-LidTap splits the display into zones: 2×2 by default, or 2×3 and 3×3. Each zone does one thing, and
-you choose which.
+LidTap splits the display into zones: 2×2 by default, or 2×1 (top and bottom halves, the most reliable,
+made for scrolling and Reels), 2×3 and 3×3. Each zone does one thing, and you choose which.
 
 | Action | What it does |
 |---|---|
@@ -50,8 +50,10 @@ lid, and knocks on the desk. Its own clicks, scrolls and key presses never count
 
 ### Scrolling and Reels
 
-Give a whole row one action: top row **Scroll Up**, bottom row **Scroll Down** (or **Previous Reel** and
-**Next Reel** for Reels, Shorts and TikTok). Zones that do the same thing are recognised as one, so a tap
+Pick the **2×1** layout (Settings → Zones → Layout): top half **Scroll Up**, bottom half **Scroll Down**, or
+**Previous Reel** and **Next Reel** for Reels, Shorts and TikTok. Its calibration moves the dot across each
+half, so a tap anywhere along it is learned, including the middle of the bottom edge where most people tap
+for Reels. On a 2×2 you can instead give a whole row one action. Zones that do the same thing are recognised as one, so a tap
 LidTap can't place between the two bottom zones still scrolls down: in testing, 40 of 40 such taps did the
 right thing at a 90% confidence floor, none the wrong thing. Keep the pointer over what you want to scroll.
 Scroll is sent as a trackpad flick (a short gesture, then momentum): ordinary pages move by the distance you

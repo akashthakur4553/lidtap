@@ -98,7 +98,7 @@ private struct TapStage: View {
                 if let t = cal.target, let i = zoneIndex(t) {
                     TapTarget()
                         .position(tapPoint(zone: i, w: w, h: h))
-                        .id(i)
+                        .id(cal.grid.cols == 1 ? i * 1000 + cal.position : i)
                         .transition(.opacity)
                 }
                 Path { p in
@@ -156,7 +156,10 @@ private struct TapStage: View {
     private func tapPoint(zone i: Int, w: CGFloat, h: CGFloat) -> CGPoint {
         let r = i / cal.grid.cols, c = i % cal.grid.cols
         let inset: CGFloat = 0.2
-        let x = c == 0 ? w * inset : c == cal.grid.cols - 1 ? (CGFloat(c) + 1 - inset) * w : (CGFloat(c) + 0.5) * w
+        // A full-width zone is tapped anywhere along it (Reels: usually the middle), so the dot moves across it.
+        let across: [CGFloat] = [0.5, 0.2, 0.8]
+        let x = cal.grid.cols == 1 ? across[cal.position % across.count] * w
+            : c == 0 ? w * inset : c == cal.grid.cols - 1 ? (CGFloat(c) + 1 - inset) * w : (CGFloat(c) + 0.5) * w
         let y = r == 0 ? h * inset + 30 : r == cal.grid.rows - 1 ? (CGFloat(r) + 1 - inset) * h : (CGFloat(r) + 0.36) * h
         return CGPoint(x: x, y: y)
     }

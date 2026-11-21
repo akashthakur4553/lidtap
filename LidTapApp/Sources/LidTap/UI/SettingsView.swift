@@ -148,7 +148,7 @@ private struct ZonesPane: View {
             } header: {
                 Text("Layout")
             } footer: {
-                Text("Fewer zones are more reliable. A new layout needs a new calibration.")
+                Text("Fewer zones are more reliable: 2×1 (top and bottom halves) is the most reliable, made for scrolling and Reels. A new layout needs a new calibration.")
             }
         }
         .onAppear {

@@ -50,6 +50,9 @@ func uiTests() {
          DisplayMap(grid: grid33, action: { actions33[zoneLabel($0)] ?? ZoneAction() }, style: .large, selected: 6).padding())
     shot("display map reliability", CGSize(width: 620, height: 420),
          DisplayMap(grid: h.app.grid, action: h.app.action(for:), style: .large, reliability: h.app.report?.zoneReliability ?? [:]).padding())
+    shot("display map 2x1", CGSize(width: 620, height: 420),
+         DisplayMap(grid: Grid(rows: 2, cols: 1), action: { ZoneAction.defaults(for: Grid(rows: 2, cols: 1))[zoneLabel($0)] ?? ZoneAction() },
+                    style: .large, selected: 1).padding())
     shot("display map compact", CGSize(width: 300, height: 220),
          DisplayMap(grid: grid33, action: { actions33[zoneLabel($0)] ?? ZoneAction() }, style: .compact).padding())
 
@@ -67,6 +70,10 @@ func uiTests() {
     shot("calibration done", size, CalibrationView().environment(h.app))
     h.app.calibration = CalibrationState(grid: grid33, perZone: 15, sequence: ["z4"], position: 0)
     shot("calibration 3x3 target centre", size, CalibrationView().environment(h.app))
+    for (n, spot) in [(0, "middle"), (1, "left"), (2, "right")] {
+        h.app.calibration = CalibrationState(grid: Grid(rows: 2, cols: 1), perZone: 15, sequence: Array(repeating: "z1", count: 3), position: n)
+        shot("calibration 2x1 bottom \(spot)", size, CalibrationView().environment(h.app))
+    }
     h.app.calibration = nil
 
     let g = PrivacyGuard(presentsOverlay: false)

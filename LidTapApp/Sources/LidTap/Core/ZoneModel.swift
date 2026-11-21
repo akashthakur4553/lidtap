@@ -6,7 +6,9 @@ struct Grid: Codable, Equatable, Hashable {
     var count: Int { rows * cols }
     var title: String { "\(rows)×\(cols)" }
 
-    static let presets = [Grid(rows: 2, cols: 2), Grid(rows: 2, cols: 3), Grid(rows: 3, cols: 3)]
+    /// 2×1 is the top and bottom halves: the most reliable split (it only has to tell near the hinge from far),
+    /// made for Scroll Up / Down and Next / Previous Reel.
+    static let presets = [Grid(rows: 2, cols: 1), Grid(rows: 2, cols: 2), Grid(rows: 2, cols: 3), Grid(rows: 3, cols: 3)]
 }
 
 func zoneLabel(_ i: Int) -> String { "z\(i)" }
@@ -148,7 +150,8 @@ enum Layouts {
         if cols >= 3 { out.append(("Columns", by { _, c in "col\(c)" })) }
         if cols >= 2 { out.append(("Left / right", by { _, c in half(cols, c).map { $0 == 0 ? "L" : "R" } })) }
         if rows >= 3 { out.append(("Rows", by { r, _ in "row\(r)" })) }
-        if rows >= 2 { out.append(("Top / bottom", by { r, _ in half(rows, r).map { $0 == 0 ? "T" : "B" } })) }
+        // With one column, top / bottom is the full grid already.
+        if rows >= 2, cols >= 2 || rows >= 3 { out.append(("Top / bottom", by { r, _ in half(rows, r).map { $0 == 0 ? "T" : "B" } })) }
         if rows >= 2, cols >= 2, !(rows == 2 && cols == 2) {
             out.append(("Corners", by { r, c in
                 guard let hr = half(rows, r), let hc = half(cols, c) else { return nil }

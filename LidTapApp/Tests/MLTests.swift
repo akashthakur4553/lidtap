@@ -103,7 +103,9 @@ func mlTests() {
         T.expect(!r.learning.isEmpty && r.learning.last!.accuracy > r.learning.first!.accuracy - 0.05, "learning curve should rise")
     }
 
-    T.run("layout mappings for 2×2, 2×3 and 3×3") {
+    T.run("layout mappings for 2×1, 2×2, 2×3 and 3×3") {
+        T.expect(Layouts.all(for: Grid(rows: 2, cols: 1)).map(\.0) == ["Full grid"], "2×1 is already top/bottom: \(Layouts.all(for: Grid(rows: 2, cols: 1)).map(\.0))")
+        T.expect(ZoneAction.defaults(for: Grid(rows: 2, cols: 1)).mapValues(\.kind) == ["z0": .scrollUp, "z1": .scrollDown], "2×1 defaults")
         let g33 = Layouts.all(for: Grid(rows: 3, cols: 3))
         T.expect(g33.map(\.0) == ["Full grid", "Columns", "Left / right", "Rows", "Top / bottom", "Corners"], "3×3 layouts \(g33.map(\.0))")
         let lr = g33.first { $0.0 == "Left / right" }!.1
