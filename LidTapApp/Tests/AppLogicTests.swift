@@ -176,11 +176,13 @@ func appLogicTests() {
     T.run("confidence floor: unsure taps say so instead of acting") {
         let h = AppHarness(name: "confidence")
         guard h.train() else { return T.fail("no model") }
-        h.app.config.minConfidence = 0.999
+        // A floor no tap can reach. (At 99.9%, about one fixture tap in ten still clears it, with logistic
+        // regression as with the SVM, so five random taps made this test flaky.)
+        h.app.config.minConfidence = 1.0
         h.performed.removeAll()
         for _ in 0..<5 { h.tap("z1") }
         let rejected = h.app.recent.prefix(5).filter { $0.outcome == .rejected }.count
-        T.expect(rejected >= 4 && h.performed.count <= 1, "with a 99.9% floor, \(rejected)/5 rejected and \(h.performed.count) acted")
+        T.expect(rejected == 5 && h.performed.isEmpty, "with a 100% floor, \(rejected)/5 rejected and \(h.performed.count) acted")
         h.app.config.minConfidence = 0.6
         h.performed.removeAll()
         for _ in 0..<5 { h.tap("z1") }
@@ -531,6 +533,19 @@ func touchActionTests() {
             T.expect(Double(steps.reduce(0) { $0 + Int($1) }) == points.rounded(), "\(points): steps \(steps)")
             T.expect(steps.allSatisfy { points >= 0 ? $0 >= 0 : $0 <= 0 }, "\(points): a step goes the wrong way \(steps)")
             T.expect(abs(Int(steps.first!)) >= abs(Int(steps.last!)), "\(points): doesn't ease out \(steps)")
+        }
+    }
+
+    T.run("a scroll is one flick: gesture began → changed → ended, then momentum begin → continue → end") {
+        for points in [300.0, -300, 750, -125] {
+            let plan = KeySender.scrollPlan(points: points)
+            T.expect(Double(plan.reduce(0) { $0 + Int($1.delta) }) == points.rounded(), "\(points): adds up to \(plan.map(\.delta))")
+            let phases = plan.map(\.phase).filter { $0 != 0 }, momentum = plan.map(\.momentum).filter { $0 != 0 }
+            T.expect(phases.first == 1 && phases.last == 4 && phases.dropFirst().dropLast().allSatisfy { $0 == 2 }, "\(points): phases \(phases)")
+            T.expect(momentum.first == 1 && momentum.last == 3 && momentum.dropFirst().dropLast().allSatisfy { $0 == 2 }, "\(points): momentum \(momentum)")
+            T.expect(plan.allSatisfy { $0.phase == 0 || $0.momentum == 0 }, "\(points): an event is both gesture and momentum")
+            let lastGesture = plan.lastIndex { $0.phase != 0 }!, firstMomentum = plan.firstIndex { $0.momentum != 0 }!
+            T.expect(lastGesture < firstMomentum, "\(points): momentum starts before the gesture ends")
         }
     }
 

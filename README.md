@@ -29,7 +29,7 @@ you choose which.
 |---|---|
 | **Desktop Left / Right** | Switch to the previous or next desktop (Space) |
 | **Mission Control, App Windows, Show Desktop** | See every window, the front app's windows, or the desktop, as with ⌃↑, ⌃↓ and F11 |
-| **Scroll Up / Down** | Scroll whatever is under the pointer, smoothly. Tap again quickly to go further; set how far in Settings → Zones |
+| **Scroll Up / Down** | Scroll whatever is under the pointer with a trackpad-style flick. Tap again quickly to go further; set how far in Settings → Zones |
 | **Next / Previous Reel** | One video on or back in Instagram Reels, YouTube Shorts, TikTok and other swipe feeds |
 | **Click, Right Click** | Click where the pointer is |
 | **Back, Forward** | Go back or forward (⌘[ and ⌘]) in Safari, Chrome, Finder and most apps |
@@ -54,8 +54,9 @@ Give a whole row one action: top row **Scroll Up**, bottom row **Scroll Down** (
 **Next Reel** for Reels, Shorts and TikTok). Zones that do the same thing are recognised as one, so a tap
 LidTap can't place between the two bottom zones still scrolls down: in testing, 40 of 40 such taps did the
 right thing at a 90% confidence floor, none the wrong thing. Keep the pointer over what you want to scroll.
-Scroll glides like a trackpad; Next / Previous Reel sends one wheel notch, which swipe feeds treat as exactly
-one video.
+Scroll is sent as a trackpad flick (a short gesture, then momentum): ordinary pages move by the distance you
+set, and feeds that snap to whole videos or items go to the next one instead of sticking halfway. Next /
+Previous Reel sends one wheel notch, which swipe feeds treat as exactly one video.
 
 ## Profiles: desk, lap, sofa
 

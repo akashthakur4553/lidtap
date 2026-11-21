@@ -55,19 +55,39 @@ enum KeySender {
     }
 
     /// Scrolls whatever is under the pointer by `points` (positive: towards the top of the content, like turning a
-    /// wheel up). It glides: the distance is spread over pixel-precise events 15 ms apart (see `scrollSteps`).
+    /// wheel up), as one trackpad flick: a short gesture, then momentum, 15 ms apart (see `scrollPlan`).
     static func scroll(points: Double) {
         let marker = stamp
-        for (i, d) in scrollSteps(points: points).enumerated() where d != 0 {
+        for (i, step) in scrollPlan(points: points).enumerated() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.015 * Double(i)) {
                 guard let ev = CGEvent(scrollWheelEvent2Source: CGEventSource(stateID: .hidSystemState), units: .pixel,
-                                       wheelCount: 1, wheel1: d, wheel2: 0, wheel3: 0) else { return }
+                                       wheelCount: 1, wheel1: step.delta, wheel2: 0, wheel3: 0) else { return }
                 ev.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+                ev.setIntegerValueField(.scrollWheelEventScrollPhase, value: step.phase)
+                ev.setIntegerValueField(.scrollWheelEventMomentumPhase, value: step.momentum)
                 ev.setIntegerValueField(.eventSourceUserData, value: marker)
                 lastPosted = MachClock.now()
                 ev.post(tap: .cghidEventTap)
             }
         }
+    }
+
+    /// CGScrollPhase and CGMomentumScrollPhase values.
+    enum ScrollPhase { static let began: Int64 = 1, changed: Int64 = 2, ended: Int64 = 4 }
+    enum MomentumPhase { static let begin: Int64 = 1, `continue`: Int64 = 2, end: Int64 = 3 }
+
+    /// The events of one flick: half the distance as a finger gesture (began, changed…, ended), the rest as momentum
+    /// (begin, continue…, end). Pages that snap to items (Instagram Reels, Shorts, TikTok, carousels) read the
+    /// momentum as a flick and carry on to the next item; without it Chrome snaps a short scroll back to where it
+    /// started, so the video seems stuck. Ordinary pages just move by the deltas, which add up to exactly `points`.
+    static func scrollPlan(points: Double) -> [(delta: Int32, phase: Int64, momentum: Int64)] {
+        let gesture = scrollSteps(points: points / 2, steps: 5)
+        let moved = Double(gesture.reduce(0) { $0 + Int($1) })
+        let momentum = scrollSteps(points: points.rounded() - moved, steps: 8)
+        return gesture.enumerated().map { ($1, $0 == 0 ? ScrollPhase.began : ScrollPhase.changed, 0) }
+            + [(0, ScrollPhase.ended, 0)]
+            + momentum.enumerated().map { ($1, 0, $0 == 0 ? MomentumPhase.begin : MomentumPhase.continue) }
+            + [(0, 0, MomentumPhase.end)]
     }
 
     /// One mouse-wheel notch under the pointer. Swipe feeds (Instagram Reels, YouTube Shorts, TikTok) move exactly one

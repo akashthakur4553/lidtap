@@ -493,6 +493,36 @@ func pointerTests() {
             T.expect(seen == [0, 1, 2, 1], "reels went \(seen)")
         }
     }
+
+    T.run("Scroll Down on a page that snaps to items settles on an item, never halfway") {
+        let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 320, height: 480))
+        let items = (0..<10).map { "<div class=r style='background:hsl(\($0 * 36),60%,50%)'>\($0)</div>" }.joined()
+        web.loadHTMLString("""
+            <style>html,body{margin:0;height:100%;overflow:hidden}#f{height:100%;overflow-y:scroll;scroll-snap-type:y mandatory}
+            .r{height:100%;scroll-snap-align:start;font:80px sans-serif;color:#fff}</style><div id=f>\(items)</div>
+            """, baseURL: nil)
+        T.wait(5) { !web.isLoading }
+        @MainActor func offset() -> Double? {
+            var out: Double?, done = false
+            web.evaluateJavaScript("var f=document.getElementById('f');f.scrollTop/f.clientHeight") { v, _ in
+                out = (v as? NSNumber)?.doubleValue
+                done = true
+            }
+            T.wait(2) { done }
+            return out
+        }
+        withPointer(over: web) {
+            var seen: [Double] = []
+            for _ in 0..<3 {
+                // A third of an item, like one 300 pt tap on a full-height video on a 13" screen.
+                perform(.scrollDown, distance: 160)
+                T.sleep(1.5)  // a snap, if any, has finished
+                seen.append(offset() ?? -1)
+            }
+            T.note("offset in items after each tap: \(seen.map { String(format: "%.2f", $0) }.joined(separator: ", "))")
+            T.expect(seen.allSatisfy { abs($0 - $0.rounded()) < 0.02 }, "stopped between items: \(seen)")
+        }
+    }
 }
 
 @MainActor
