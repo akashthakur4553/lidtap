@@ -1,7 +1,8 @@
 import Foundation
 
 // Scores every recogniser on a recorded dataset, offline. The dataset is only read, never changed.
-//   scripts/eval.sh [path/to/dataset.json]        default: this Mac's own calibration
+//   scripts/eval.sh [path/to/dataset.json] [--min-strength °/s]
+//   default dataset: this Mac's own calibration; default strength limit: the one LidTap learns (TapStrength)
 //
 // 1. Cross-validated accuracy per recogniser and layout, as Settings → Training reports it.
 // 2. A live-use simulation: each held-out tap goes through the real ZoneModel with the default
@@ -9,10 +10,16 @@ import Foundation
 //    It runs twice: with every zone on its own action, and with one action per row (top = Scroll Up,
 //    bottom = Scroll Down), where zones that share an action are recognised as one group.
 
-let path = CommandLine.arguments.dropFirst().first
+var args = Array(CommandLine.arguments.dropFirst()), strengthOverride: Double?
+if let i = args.firstIndex(of: "--min-strength"), i + 1 < args.count {
+    strengthOverride = Double(args[i + 1])
+    args.removeSubrange(i...(i + 1))
+}
+let path = args.first
     ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/LidTap/dataset.json").path
 let ds = try JSONDecoder().decode(Dataset.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
-let limit = TapStrength.learned(from: ds.samples.filter { $0.label != noiseLabel }.map(\.peakG))
+let learnedLimit = TapStrength.learned(from: ds.samples.filter { $0.label != noiseLabel }.map(\.peakG))
+let limit = strengthOverride ?? learnedLimit
 let samples = ds.samples.filter { $0.label == noiseLabel || $0.peakG >= limit }
 let X = samples.map { Features.extract(g: $0.g, a: $0.a) }
 let labels = samples.map(\.label)
@@ -44,7 +51,10 @@ func folds() -> [Int] {
     return fold
 }
 
+/// Taps lighter than this count separately as "light" (the strength LidTap would learn on its own).
+var light = (right: 0, wrong: 0, unsure: 0)
 func simulate(_ kind: ModelKind, group: ((String) -> String)?) -> (right: Int, wrong: Int, unsure: Int, bumpsActed: Int) {
+    light = (0, 0, 0)
     let fold = folds(), defaults = AppConfig()
     let same: (String, String) -> Bool = { a, b in group.map { $0(a) == $0(b) } ?? (a == b) }
     var right = 0, wrong = 0, unsure = 0, bumps = 0
@@ -56,12 +66,15 @@ func simulate(_ kind: ModelKind, group: ((String) -> String)?) -> (right: Int, w
             let acts = p.rejected == nil && p.confidence >= defaults.minConfidence
             if labels[i] == noiseLabel {
                 if acts { bumps += 1 }
-            } else if !acts {
-                unsure += 1
-            } else if same(p.label, labels[i]) {
-                right += 1
             } else {
-                wrong += 1
+                let isLight = samples[i].peakG < learnedLimit
+                if !acts {
+                    unsure += 1; if isLight { light.unsure += 1 }
+                } else if same(p.label, labels[i]) {
+                    right += 1; if isLight { light.right += 1 }
+                } else {
+                    wrong += 1; if isLight { light.wrong += 1 }
+                }
             }
         }
     }
@@ -76,6 +89,9 @@ for (title, group) in [("every zone its own action", nil), ("one action per row,
     for kind in ModelKind.allCases {
         let r = simulate(kind, group: group)
         func pc(_ v: Int) -> String { String(format: "%5.1f%%", 100 * Double(v) / Double(max(zoneTaps, 1))) }
-        print(pad(kind.title, 24) + "right \(pc(r.right))   wrong \(pc(r.wrong))   not sure \(pc(r.unsure))   bumps acted on: \(r.bumpsActed)")
+        var line = pad(kind.title, 24) + "right \(pc(r.right))   wrong \(pc(r.wrong))   not sure \(pc(r.unsure))   bumps acted on: \(r.bumpsActed)"
+        let n = light.right + light.wrong + light.unsure
+        if n > 0 { line += "   light taps (< \(String(format: "%.1f", learnedLimit))): \(light.right) right, \(light.wrong) wrong, \(light.unsure) not sure of \(n)" }
+        print(line)
     }
 }

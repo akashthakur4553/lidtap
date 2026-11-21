@@ -172,11 +172,13 @@ pointer), so run them only when you aren't using the Mac.
 **Compare recognisers on recorded taps** (your own calibration by default, or any `dataset.json`):
 
 ```bash
-LidTapApp/scripts/eval.sh [path/to/dataset.json]
+LidTapApp/scripts/eval.sh [path/to/dataset.json] [--min-strength 1.5]
 ```
 
 It prints cross-validated accuracy per recogniser and layout, the learning curve, and a live-use simulation
-(right, wrong, "not sure") with and without zones sharing an action. It only reads the dataset.
+(right, wrong, "not sure") with and without zones sharing an action. `--min-strength` tries another
+minimum tap strength and shows how the lighter taps it lets in are recognised, to decide whether to lower
+the limit in Settings → Detection. It only reads the dataset.
 
 **How it works, briefly:** the app reads the accelerometer and gyroscope through IOKit HID
 (`AppleSPUHIDDevice`, ~800 Hz), high-pass filters the gyro, and triggers on an adaptive threshold.
