@@ -158,6 +158,9 @@ final class TapDetector {
     private var gyro = Ring3(capacity: 4096), accel = Ring3(capacity: 4096)
     private var noiseMS: Double?
     private var warmSum = 0.0, warmCount = 0
+    /// Mean-square motion of each recent 50 ms slice outside taps, newest last (the last 2 s).
+    private var slices: [Double] = [], sliceSum = 0.0, sliceCount = 0
+    static let sliceLength = 40, sliceWindow = 40
     private var threshold = 1.0
     private var warmUntil: Double?
     private var refractoryUntil = 0.0, quietUntil = 0.0, lastAbove = -Double.infinity
@@ -216,16 +219,27 @@ final class TapDetector {
 
     private func detect(time t: Double, mag: Double) {
         if warmUntil == nil { warmUntil = t + 1 }
-        // Noise floor: averaged over the 1 s warm-up, then a slow (~2 s) average outside taps. Each update is
-        // clipped at 4x the current level so a tap can't inflate it, yet it still rises on a genuinely noisy
-        // surface (an estimate that only updated below the trigger could get stuck under it forever).
+        // Noise floor: averaged over the 1 s warm-up, then the 25th percentile of the motion in 50 ms slices over
+        // the last 2 s, skipping the half second after each tap. A tap's ringing fills only a few slices, so a run
+        // of taps a second apart (calibration, scrolling Reels) can't lift it; the slow average it replaces did,
+        // and the higher trigger made people tap harder, which lifted it further. Steady motion (a lap, a train)
+        // still raises it, and after handling it settles within 2 s instead of 15-20.
         if t < warmUntil! {
             warmSum += mag * mag
             warmCount += 1
             noiseMS = warmSum / Double(warmCount)
-        } else if t >= quietUntil, let ms = noiseMS {
-            let clip = 16 * max(ms, 1e-6)
-            noiseMS = ms + (min(mag * mag, clip) - ms) / (2 * Self.fs)
+        } else {
+            sliceSum += mag * mag
+            sliceCount += 1
+            if sliceCount >= Self.sliceLength {
+                if t >= quietUntil {
+                    slices.append(sliceSum / Double(sliceCount))
+                    if slices.count > Self.sliceWindow { slices.removeFirst(slices.count - Self.sliceWindow) }
+                    if slices.count >= 4 { noiseMS = percentile(slices, 25) }
+                }
+                sliceSum = 0
+                sliceCount = 0
+            }
         }
         let noise = (noiseMS ?? 0).squareRoot()
         threshold = max(_settings.minThreshold, _settings.k * noise)

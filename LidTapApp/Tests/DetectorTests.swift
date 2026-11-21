@@ -8,7 +8,7 @@ final class StreamSim {
     var t: Double
     var lid = 120
     private var rng = SplitMix64(seed: 7)
-    let gyroNoise: Double
+    var gyroNoise: Double
 
     init(start: Double = 1000, gyroNoise: Double = 0.1, settings: DetectorSettings = { var s = DetectorSettings(); s.gating = false; return s }()) {
         t = start
@@ -25,7 +25,9 @@ final class StreamSim {
 
     /// Undoes the detector's 5 Hz high-pass so a recorded (already high-passed) window can be injected as raw
     /// sensor data: y[n] = a(y[n-1] + x[n] - x[n-1])  =>  x[n] = x[n-1] + y[n]/a - y[n-1].
-    /// After the window the offset ramps back to zero over 0.4 s (slow enough to stay below any trigger).
+    /// After the window the offset ramps back to zero over 0.4 s. Through the high-pass that ramp reads as a flat
+    /// ~0.9 °/s step lasting 0.4 s, which no real tap has: keep injected taps at least 0.8 s apart when the next
+    /// one must trigger at the 1 °/s floor.
     static func unHighPass(_ y: [[Double]]) -> [SIMD3<Double>] {
         let rc = 1 / (2 * Double.pi * 5.0), a = rc / (rc + 1 / TapDetector.fs)
         var x = SIMD3<Double>.zero, prev = SIMD3<Double>.zero
@@ -124,7 +126,7 @@ func detectorTests() {
         sim.feed(seconds: 1.5, taps: [(0.2, s, 1), (0.35, s, 1)])  // 150 ms apart: inside 350 ms dead time
         T.expect(sim.events.count == 1, "bounce gave \(sim.events.count) events")
         sim.events.removeAll()
-        sim.feed(seconds: 1.5, taps: [(0.2, s, 1), (0.8, s, 1)])  // 600 ms apart
+        sim.feed(seconds: 1.5, taps: [(0.2, s, 1), (1.0, s, 1)])  // 800 ms apart, clear of the simulator's ramp step
         T.expect(sim.events.count == 2, "double tap gave \(sim.events.count) events")
     }
 
@@ -146,6 +148,37 @@ func detectorTests() {
         T.note(String(format: "noisy surface: noise %.2f, trigger %.2f °/s, false taps %d", st.noise, st.threshold, sim.events.count))
         T.expect(st.threshold > 3, "threshold did not rise (\(st.threshold))")
         T.expect(sim.events.count <= 1, "\(sim.events.count) false taps on a noisy surface")
+    }
+
+    T.run("a run of taps a second apart doesn't raise the trigger, and a light tap after it still counts") {
+        // Calibration and Reels are runs of taps about a second apart. Each tap's tail used to leak into the noise
+        // estimate, which raised the trigger, which made people tap harder: on a real 13" MacBook Pro the trigger
+        // climbed from 1 to 17 °/s during one calibration round.
+        let sim = StreamSim(gyroNoise: 0.1)
+        sim.feed(seconds: 2)
+        let tap = byLabel["z0"]!.max { $0.peakG < $1.peakG }!, light = byLabel["z2"]![0]
+        let firm = 15 / tap.peakG
+        sim.feed(seconds: 15, taps: (0..<15).map { (at: 0.5 + Double($0), sample: tap, gain: firm) })
+        let st = sim.det.currentStatus()
+        T.note(String(format: "after 15 firm taps: noise %.2f, trigger %.2f °/s, taps %d", st.noise, st.threshold, sim.events.count))
+        T.expect(st.threshold < 1.5, "the run raised the trigger to \(st.threshold) °/s")
+        let before = sim.events.count
+        sim.feed(seconds: 1, taps: [(at: 0.3, sample: light, gain: 2.0 / light.peakG)])
+        T.expect(sim.events.count == before + 1, "a 2 °/s tap right after the run was missed")
+    }
+
+    T.run("after heavy handling the trigger comes back down within 2 s") {
+        let sim = StreamSim(gyroNoise: 0.1)
+        sim.feed(seconds: 2)
+        sim.gyroNoise = 8  // the bump step: picking the laptop up, knocking the desk
+        sim.feed(seconds: 5)
+        let high = sim.det.currentStatus().threshold
+        sim.gyroNoise = 0.1
+        sim.feed(seconds: 2)
+        let st = sim.det.currentStatus()
+        T.note(String(format: "trigger %.1f °/s while handled, %.2f °/s 2 s later", high, st.threshold))
+        T.expect(high > 10, "the trigger didn't rise while the laptop was handled (\(high))")
+        T.expect(st.threshold < 1.5, "trigger still \(st.threshold) °/s 2 s after handling stopped")
     }
 
     T.run("lid movement gates the tap") {
